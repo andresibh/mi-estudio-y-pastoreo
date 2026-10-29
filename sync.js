@@ -7,7 +7,7 @@ const empty=()=>({temas:[{id:'t1',nombre:'Ánimo y desánimo',padre:''},{id:'t2'
 const valid=d=>d&&Array.isArray(d.temas)&&Array.isArray(d.refs)&&d.temas.every(t=>t&&typeof t.id==='string'&&typeof t.nombre==='string')&&d.refs.every(r=>r&&typeof r.id==='string'&&typeof r.titulo==='string');
 const status=s=>{$('syncStatus').textContent=s};
 const cacheKey=()=>`mep_v2:${new URL(window.MEP_CONFIG.supabaseUrl).hostname}:${user.id}`;
-function remember(){try{localStorage.setItem(cacheKey(),JSON.stringify({data:MEP.get(),revision,dirty}));return true}catch{status('No se pudo guardar la copia local. Mantén abierta la aplicación y exporta un respaldo.');return false}}
+function remember(){try{localStorage.setItem(cacheKey(),JSON.stringify({data:MEP.get(),revision,dirty,revisionTime}));return true}catch{status('No se pudo guardar la copia local. Mantén abierta la aplicación y exporta un respaldo.');return false}}
 function lock(value){main.hidden=value;$('accountActions').hidden=!user;$('loginForm').hidden=!!user}
 function download(data){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));a.download='mi-estudio-copia-'+new Date().toISOString().slice(0,10)+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 function errorMessage(error){if(!navigator.onLine)return 'Sin conexión. Los cambios pendientes permanecen en este navegador.';if(error?.status===401||/jwt|expired|refresh_token/i.test(error?.message||''))return 'La sesión necesita renovarse. Exporta los cambios pendientes antes de volver a iniciar sesión.';return 'No se pudo sincronizar. Revisa la conexión y la configuración de Supabase. Tus cambios no se han confirmado en la nube.'}
@@ -24,7 +24,7 @@ async function sync(){
      if(token!==epoch)return;if(error)throw error;
      if(data.conflict){const row=await readCloud();if(token===epoch)conflict(row);return}
      revision=data.revision;revisionTime=data.updated_at;dirty=generation!==sentGeneration;remember();
-     status(dirty?'Hay cambios pendientes…':'Sincronizado · '+new Date(revisionTime).toLocaleTimeString('es'));
+     status(dirty?'Hay cambios pendientes…':'Sincronizado · '+new Date(revisionTime).toLocaleString('es'));
    }else{
      const row=await readCloud();if(token!==epoch)return;
      // A local edit may occur during the request. Never replace it.
@@ -33,7 +33,7 @@ async function sync(){
        if(MEP.busy()){status('Hay cambios de otro dispositivo. Abre Biblioteca para recibirlos.');return}
        MEP.set(row.data);revision=row.revision;revisionTime=row.updated_at;remember();
      }
-     status('Sincronizado · '+new Date().toLocaleTimeString('es'));
+     revisionTime=row?.updated_at||revisionTime;status(revisionTime?'Último guardado en la nube · '+new Date(revisionTime).toLocaleString('es'):'Sin cambios guardados en la nube todavía.');
    }
  }catch(e){if(token===epoch)status(errorMessage(e))}
  finally{busy=false;if(token===epoch&&dirty&&!blocked&&navigator.onLine)setTimeout(()=>sync(),5000)}
@@ -41,16 +41,16 @@ async function sync(){
 window.MEPSync={save(data){if(!ready||!user)throw Error('Inicia sesión primero');if(!valid(data))throw Error('Biblioteca inválida');dirty=true;generation++;remember();status('Cambios guardados aquí; pendientes de sincronizar.');void sync()}};
 async function activate(session){
  const next=session?.user;if(next&&user?.id===next.id&&ready){void sync();return}
- epoch++;const token=epoch;user=next||null;ready=false;blocked=false;remote=null;dirty=false;revision=0;$('conflict').hidden=true;lock(true);MEP.set({temas:[],refs:[]});
+ epoch++;const token=epoch;user=next||null;ready=false;blocked=false;remote=null;dirty=false;revision=0;revisionTime='';$('conflict').hidden=true;lock(true);MEP.set({temas:[],refs:[]});
  if(!user){status('Inicia sesión para abrir tu biblioteca privada.');return}
  $('accountEmail').textContent=user.email||'';status('Abriendo tu biblioteca…');
  let cache;try{cache=JSON.parse(localStorage.getItem(cacheKey()))}catch{}
  try{
    const row=await readCloud();if(token!==epoch)return;
    if(cache?.dirty&&valid(cache.data)){
-     MEP.set(cache.data);revision=cache.revision;dirty=true;
+     MEP.set(cache.data);revision=cache.revision;revisionTime=cache.revisionTime||'';dirty=true;
      if((row?.revision||0)!==revision)conflict(row);
-   }else{MEP.set(row?.data||empty());revision=row?.revision||0}
+   }else{MEP.set(row?.data||empty());revision=row?.revision||0;revisionTime=row?.updated_at||''}
    ready=true;lock(false);remember();
    let legacy;try{legacy=JSON.parse(localStorage.getItem('mep_v1'))}catch{}
    $('migrate').hidden=!valid(legacy);
@@ -87,7 +87,7 @@ $('migrate').onclick=()=>{
  // The original remains untouched until the user deliberately removes it.
  status('Biblioteca anterior copiada. Comprueba que aparezca Sincronizado antes de cambiar de dispositivo.');
 };
-window.addEventListener('online',()=>sync());document.addEventListener('visibilitychange',()=>{if(!document.hidden)void sync()});
+window.addEventListener('offline',()=>status('Sin conexión. Los cambios pendientes permanecen en este navegador.'));window.addEventListener('online',()=>sync());document.addEventListener('visibilitychange',()=>{if(!document.hidden)void sync()});
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue=''}});
 async function init(){
  const cfg=window.MEP_CONFIG||{};
